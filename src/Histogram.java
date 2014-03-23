@@ -1,4 +1,4 @@
-package com.boddy.iotester;
+package im.boddy.iotester;
 
 public class Histogram
 {
