@@ -1,3 +1,5 @@
+package com.boddy.iotester;
+
 import java.util.*;
 import java.util.concurrent.atomic.*;
 import java.net.*;
@@ -9,122 +11,6 @@ public abstract class IOTester implements Runnable
     static Histogram readHistogram, writeHistogram;
     static String histFileName;
     static int sleepTick;
-
-    static class Histogram
-    {
-        final float[] vals;
-        final float xMin, xMax, binWidth;
-        final int nBins, underflowBin, overflowBin;
-        private String title, xTitle, yTitle; 
-
-
-        public Histogram(int nBins, float xMin, float xMax)
-        {
-            this.binWidth = (xMax - xMin) / nBins;
-            if (binWidth < 0)
-                throw new IllegalArgumentException();
-
-            this.nBins = nBins;
-            this.vals = new float[nBins+2];
-            this.xMin = xMin; 
-            this.xMax = xMax;
-            this.underflowBin = vals.length-2;
-            this.overflowBin = vals.length-1;
-        }
-
-        public synchronized void setTitles(String title, String xTitle, String yTitle)
-        {
-            this.title = title;
-            this.xTitle = xTitle;
-            this.yTitle = yTitle;
-        }
-
-        public synchronized float getAverage()
-        {
-            float totalWeight = 0, totalVal = 0;
-            for (int i=0;i < nBins; i++)
-            {
-                totalWeight += binYval(i);
-                totalVal += binXval(i) * binYval(i);
-            }
-
-            if (totalWeight == 0)
-                return 0;
-
-            return totalVal / totalWeight;
-        }
-
-        public synchronized float getVariance()
-        {
-            float ave = getAverage();
-            float totalWeight = 0, variance = 0;
-
-            for (int i=0;i < nBins; i++)
-            {
-                totalWeight += binYval(i);
-                variance += binYval(i) * (binXval(i) - ave)*(binXval(i) - ave);
-            }
-
-            if (totalWeight == 0)
-                return 0;
-
-            variance /= totalWeight;
-            return variance;
-        }
-
-        private int getBin(float val)
-        {
-            if (val < xMin)
-                return underflowBin;
-            if (val > xMax)
-                return overflowBin;
-
-            return (int) ((val - xMin) / binWidth);
-        } 
-
-
-        public synchronized void add(float val)
-        {
-            add(val,1.f);
-        }
-
-        public synchronized void add(float val, float weight)
-        {
-            vals[getBin(val)] += weight;
-        }
-
-        public float binXval(int iBin)
-        {
-            if (iBin < 0 || iBin >= nBins)
-                throw new IllegalArgumentException();
-
-            return xMin + binWidth/2 + iBin * binWidth;
-        }
-        public float binYval(int iBin)
-        {
-            if (iBin < 0)
-                return vals[underflowBin];
-            if (iBin >= nBins)
-                return vals[overflowBin];
-
-            return vals[iBin];
-        }
-
-        public synchronized String toString()
-        {
-            StringBuilder sb = new StringBuilder();
-
-            sb.append("title : "+ title+"\nxTitle : "+ xTitle +"\nyTitle : "+ yTitle+"\n");
-            sb.append("underflow : "+ vals[underflowBin] + "\noverflow :" +vals[overflowBin]+"\n\n");
-            sb.append("average : "+ getAverage() +"\n");
-            sb.append("variance : "+ getVariance() +"\n");
-            for (int iBin=0;iBin < nBins;iBin++)
-                sb.append(binXval(iBin) +" "+ binYval(iBin) +"\n");
-
-            return sb.toString();
-        }
-
-    }
 
     protected final AtomicLong readCount, writeCount;
     protected final int duration, bufferSize;
@@ -206,9 +92,13 @@ public abstract class IOTester implements Runnable
     public static String usage()
     {
         StringBuilder sb = new StringBuilder();
-        sb.append("Usage:\n\n");
-        sb.append("java NetworkIOTester -serverAddress <ServerAddress> (default: null) -clientAddresses <Address1,Address2 (default null)> -threadCount <number of client threads to each server address (default 1)> -duration <length of test in seconds (default infinite)> -windowSize <TCP window size (default 64K)> -filePath <path to file for disk I/O (default null)>\n");
+        sb.append("IOTester Usage:\n\n");
+        sb.append("Two modes : profile TCP performance and profile the file-system performance.\n\nTo use the network:\n");
+        sb.append("java -jar IOTester.jar -serverAddress <ServerAddress (default null)> -clientAddresses <Address1,Address2 (default null)> -threadCount <number of client threads to each server address (default 1)> -duration <length of test in seconds (default infinite)> -windowSize <TCP window size (default 64K)> -filePath <path to file for disk I/O (default null)>\n");
         sb.append("eg. java NetworkIOTester -serverAddress 192.168.2.43:1337 -clientAddresses 192.168.2.43:1337,192.168.2.2:1337 -threadCount 5 -duration 120\n");
+        sb.append("\nTo use the file-system:\n");
+        sb.append("java -jar IOTester.jar -filePath /path/to/file -maxFileSize <Maximum size the file can grow to (default 1MB)> -reading <true/false if true, will readfrom file, if false will write to file (default false)> -randomAccess <true/false (defalut false)> -windowSize <Individual read/write size (default 64K)>\n");
+        sb.append("eg. java -jar IOTester.jar -filePath /path/to/file -reading false -maxFileSize 1000000000");
         return sb.toString();
     }
 

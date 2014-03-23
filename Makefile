@@ -16,7 +16,7 @@ iotester:
 	echo "Specification-Version: 1" >> jar.manifest
 	echo "Specification-Vendor: theBoddy" >> jar.manifest 	
 	echo "Implementation-Version: 1.01" >> jar.manifest
-	echo "Main-Class: IOTester" >> jar.manifest
+	echo "Main-Class: com.boddy.iotester.IOTester" >> jar.manifest
 	echo "" >> jar.manifest
 
 	jar -cfm IOTester.jar jar.manifest  -C build  .
