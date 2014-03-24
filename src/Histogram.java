@@ -2,17 +2,23 @@ package im.boddy.iotester;
 
 public class Histogram
 {
-    final float[] vals;
-    final float xMin, xMax, binWidth;
-    final int nBins, underflowBin, overflowBin;
+    /**
+     * Thread safe
+     */ 
+    private final float[] vals;
+    private final float xMin, xMax, binWidth;
+    private final int nBins, underflowBin, overflowBin;
     private String title, xTitle, yTitle; 
 
 
     public Histogram(int nBins, float xMin, float xMax)
     {
+        if (nBins <=0)
+            throw new IllegalArgumentException("Number of bins must be greater than zero.");
+
         this.binWidth = (xMax - xMin) / nBins;
-        if (binWidth < 0)
-            throw new IllegalArgumentException();
+        if (binWidth <= 0)
+            throw new IllegalArgumentException("xMin must be less than xMax");
 
         this.nBins = nBins;
         this.vals = new float[nBins+2];
@@ -99,13 +105,16 @@ public class Histogram
 
         return vals[iBin];
     }
-
+    
+    public synchronized float getUnderflow(){return vals[underflowBin];}
+    public synchronized float getOverflow(){return vals[overflowBin];}
+    
     public synchronized String toString()
     {
         StringBuilder sb = new StringBuilder();
 
         sb.append("title : "+ title+"\nxTitle : "+ xTitle +"\nyTitle : "+ yTitle+"\n");
-        sb.append("underflow : "+ vals[underflowBin] + "\noverflow :" +vals[overflowBin]+"\n\n");
+        sb.append("underflow : "+ getUnderflow() + "\noverflow :" + getOverflow() +"\n\n");
         sb.append("average : "+ getAverage() +"\n");
         sb.append("variance : "+ getVariance() +"\n");
         for (int iBin=0;iBin < nBins;iBin++)
@@ -113,5 +122,28 @@ public class Histogram
 
         return sb.toString();
     }
+    
+    public synchronized String toJSON()
+    {
+        StringBuilder sb = new StringBuilder();
+        sb.append("{\"title\" : \""+title+"\", ");
+        sb.append("\"xTitle\" : \""+xTitle+"\", ");
+        sb.append("\"yTitle\" : \""+yTitle+"\", ");
+        sb.append("\"underflow\" : "+ getUnderflow() +", ");
+        sb.append("\"overflow\" : "+ getOverflow() +", ");
+        sb.append("\"average\" : "+getAverage()+", ");
+        sb.append("\"variance\" : "+getVariance()+", ");
+        sb.append("\"binVals\" : [ \n");
+        for (int iBin=0;iBin < nBins;iBin++)
+        {
+            sb.append("{\"xVal\" : "+ binXval(iBin) +", \"yVal\" : "+ binYval(iBin) +"}");
+            if (iBin != nBins-1)
+                sb.append(",");
+            sb.append("\n");
+        }
+        sb.append("]}"); 
+        return sb.toString();
+    }
+
 
 }

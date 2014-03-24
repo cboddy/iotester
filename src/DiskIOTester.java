@@ -9,6 +9,9 @@ import java.nio.channels.*;
 
 public class DiskIOTester extends IOTester
 {
+    /**
+     * Thread safe
+     */ 
     class Handler implements Runnable
     {
         private final byte[] buffer = new byte[bufferSize];
@@ -70,17 +73,21 @@ public class DiskIOTester extends IOTester
             }
         }
 
-        public void close()
+        public synchronized void close()
         {
+            if (isClosed)
+                return;
             isClosed = true;
             try
             {
                 channel.close();
                 rFile.close();
-            } catch (IOException ioe){}
+            } catch (IOException ioe){
+                ioe.printStackTrace();
+            }
         }
 
-        private long nextPosition()
+        private synchronized long nextPosition()
         {
             long pos = lastPosition;
             if (! randomAccess)
@@ -93,7 +100,7 @@ public class DiskIOTester extends IOTester
             
             pos %= (maxSize - buffer.length);
             lastPosition = pos;
-            return pos % maxSize; 
+            return pos; 
         }
     }
 
@@ -126,8 +133,10 @@ public class DiskIOTester extends IOTester
         }
     }    
 
-    public void init()
+    public synchronized void init()
     {
+        if (handler != null)
+            return;
         try
         {
             handler = new Handler();
@@ -136,7 +145,7 @@ public class DiskIOTester extends IOTester
             throw new IllegalStateException(ioe);
         }
     }
-    public void close()
+    public synchronized void close()
     {
         handler.close();
     }

@@ -7,11 +7,14 @@ import java.io.*;
 
 public class NetworkIOTester extends IOTester 
 {
+    /**
+     * Thread safe
+     */ 
 
     class Server implements Runnable
     {
-        final InetSocketAddress address;
-        final ServerSocket ssocket;
+        private final InetSocketAddress address;
+        private final ServerSocket ssocket;
 
         Server(InetSocketAddress address) throws IOException
         {
