@@ -1,24 +1,36 @@
 package im.boddy.iotester;
 
 import java.util.*;
+import java.util.concurrent.*;
 import java.util.concurrent.atomic.*;
 import java.net.*;
 import java.io.*;
 
 public abstract class IOTester implements Runnable
 {
-    static final int BUFFER_LENGTH = 64*1024;
-    static Histogram readHistogram, writeHistogram;
-    static String histFileName;
-    static int sleepTick;
+    public static final int DEFAULT_BUFFER_LENGTH = 64*1024;
+    
+    private static Histogram readHistogram, writeHistogram;
+    private static String histFileName;
+    private static int sleepTick = 100;
+    
+    protected volatile boolean isClosed;
+    protected final CountDownLatch latch;
 
-    protected final AtomicLong readCount, writeCount;
+    protected final AtomicLong readCount, writeCount, totalReadCount, totalWriteCount;
     protected final int duration, bufferSize;
-    protected final Random random = new Random();
+    protected final Random random;
+    
     public IOTester(int duration, int bufferSize)
     {
         this.readCount = new AtomicLong();
         this.writeCount = new AtomicLong();
+        this.totalReadCount = new AtomicLong();
+        this.totalWriteCount = new AtomicLong();
+
+        this.random = new Random();
+
+        this.latch = new CountDownLatch(1);
 
         this.duration = duration;
         this.bufferSize = bufferSize;
@@ -26,16 +38,20 @@ public abstract class IOTester implements Runnable
 
     abstract void init();
 
-    abstract void close();
+    protected synchronized void close()
+    {
+        isClosed = true;
+    }
 
     public void run()
     {
         init();
-
+        
         long previousTime  = System.currentTimeMillis(); 
         long startTime = previousTime;
+        latch.countDown();
 
-        while(true)
+        while(! isClosed)
         {
             try
             {
@@ -45,14 +61,23 @@ public abstract class IOTester implements Runnable
             long time = System.currentTimeMillis(); 
             float deltaTime = (float) (time -  previousTime);  
 
-            float readRate = toMBperSec(readCount, deltaTime);
-            float writeRate = toMBperSec(writeCount, deltaTime);
+            long deltaRead = readCount.getAndSet(0);
+            long deltaWrite = writeCount.getAndSet(0); 
 
-            System.out.println ("read rate "+ readRate +" Mb/sec, write rate "+ writeRate + " Mb/sec");
+            totalReadCount.addAndGet(deltaRead);
+            totalWriteCount.addAndGet(deltaWrite);
+
+            float readRate = toMBperSec(deltaRead, deltaTime);
+            float writeRate = toMBperSec(deltaWrite, deltaTime);
+
+
+            System.out.println ("read rate "+ readRate +" MB/sec, write rate "+ writeRate + " MB/sec");
             previousTime = time;
 
-            readHistogram.add(readRate);
-            writeHistogram.add(writeRate); 
+            if (readHistogram != null)
+                readHistogram.add(readRate);
+            if (writeHistogram != null)
+                writeHistogram.add(writeRate); 
 
             if (duration > 0 && time-startTime > duration)
                 break;
@@ -61,9 +86,9 @@ public abstract class IOTester implements Runnable
         close();
     } 
 
-    public static float toMBperSec(AtomicLong byteCount, float timeMillis)
+    public static float toMBperSec(long byteCount, float timeMillis)
     {
-        return ((float) (byteCount.getAndSet(0) / 1024)) / timeMillis;
+        return ((float) (byteCount / 1024)) / timeMillis;
     }
 
     public static InetSocketAddress socketAddressFromString(String s)
@@ -101,17 +126,30 @@ public abstract class IOTester implements Runnable
         sb.append("eg. java -jar IOTester.jar -filePath /path/to/file -reading false -maxFileSize 1000000000");
         return sb.toString();
     }
+    public long totalReadCount(){return totalReadCount.get();}
+    public long totalWriteCount(){return totalWriteCount.get();}
+    public synchronized boolean isClosed(){return isClosed;}
 
     public static void main(String[] args) throws IOException
     {
         Map<String,String> map = argMap(args);
         String s = null;
 
-        InetSocketAddress serverAddress = socketAddressFromString(map.get("serverAddress"));
+        float xMin = (s= map.get("xMin")) != null ? Float.parseFloat(s) : 0; 
+        float xMax = (s= map.get("xMax")) != null ? Float.parseFloat(s) : 10000; // 5 seconds
+        int nBins = (s = map.get("nBins")) != null ? Integer.parseInt(s) : 1000;
+
+        IOTester.readHistogram = new Histogram(nBins, xMin, xMax,"Read","Sampled I/O rate","Frequency");
+        IOTester.writeHistogram = new Histogram(nBins, xMin, xMax,"Write","Sampled I/O rate","Frequency");
+
+        IOTester.sleepTick = (s = map.get("tick")) != null ? Integer.parseInt(s) : 100; // 1 second 
+        IOTester.histFileName = (s = map.get("histFile")) != null ? s : "hist.txt"; // 1 second 
 
         int threadCount =(s = map.get("threadCount")) != null ? Integer.parseInt(s) : 1;
         int duration = (s = map.get("duration")) != null ? Integer.parseInt(s) * 1000 : -1;
-        int bufferSize = (s = map.get("windowSize")) != null ? Integer.parseInt(s) : BUFFER_LENGTH;
+        int bufferSize = (s = map.get("windowSize")) != null ? Integer.parseInt(s) : DEFAULT_BUFFER_LENGTH;
+
+        InetSocketAddress serverAddress = socketAddressFromString(map.get("serverAddress"));
 
         InetSocketAddress[] clientAddresses = null;
         String clients = map.get("clientAddresses");
@@ -135,39 +173,9 @@ public abstract class IOTester implements Runnable
         }
 
 
-
-        float xMin = (s= map.get("xMin")) != null ? Float.parseFloat(s) : 0; 
-        float xMax = (s= map.get("xMax")) != null ? Float.parseFloat(s) : 10000; // 5 seconds
-        int nBins = (s = map.get("nBins")) != null ? Integer.parseInt(s) : 1000;
-
-
-        IOTester.readHistogram = new Histogram(nBins, xMin, xMax);
-        IOTester.readHistogram.setTitles("read hist","time","rate");
-        IOTester.writeHistogram = new Histogram(nBins, xMin, xMax);
-        IOTester.writeHistogram.setTitles("write hist","time","rate");
-
-        IOTester.sleepTick = (s = map.get("tick")) != null ? Integer.parseInt(s) : 100; // 1 second 
-        IOTester.histFileName = (s = map.get("histFile")) != null ? s : "hist.txt"; // 1 second 
-
-
-        if (filePath != null)
-        {
-            long maxSize = (s = map.get("maxFileSize")) != null ? Long.parseLong(s) : 0x100000;
-            boolean reading = (s = map.get("reading")) != null ? Boolean.parseBoolean(s) : false;
-            boolean randomAccess = (s = map.get("randomAccess")) != null ? Boolean.parseBoolean(s) : false;
-
-            new Thread(new DiskIOTester(duration, bufferSize, filePath, reading, maxSize, randomAccess)).start();
-        }
-
-
-
-
-        if (serverAddress == null && clientAddresses == null)
-            return;
-
-        System.out.println("Starting with duration "+ duration + " ms, windowSize "+ bufferSize +" bytes and "+ threadCount +" threads for each client connection.");
-        new Thread(new NetworkIOTester(serverAddress, clientAddresses, threadCount, duration, bufferSize)).start();
-
+        //
+        // Shutdown hook to write histograms 
+        //
         Runtime.getRuntime().addShutdownHook(new Thread(new Runnable(){
             public void run()
         {
@@ -190,6 +198,32 @@ public abstract class IOTester implements Runnable
         }
         }}));
 
-    }
+
+
+        if (filePath != null)
+        {
+            
+            long maxSize = (s = map.get("maxFileSize")) != null ? Long.parseLong(s) : 0x100000;
+            boolean reading = (s = map.get("reading")) != null ? Boolean.parseBoolean(s) : false;
+            boolean randomAccess = (s = map.get("randomAccess")) != null ? Boolean.parseBoolean(s) : false;
+
+            StringBuilder sb = new StringBuilder();
+            sb.append("Starting Disk I/O test with file "+ filePath +" with duration "+ duration + " ms, I/O operation size "+ bufferSize +" and max file-size "+ maxSize);
+            if (randomAccess)
+                sb.append(" in random-access mode.");
+            else
+                sb.append(" in sequential-position mode.");
+
+            System.out.println(sb.toString());
+
+            new Thread(new DiskIOTester(duration, bufferSize, filePath, reading, maxSize, randomAccess)).start();
+        }
+
+        if (serverAddress == null && clientAddresses == null)
+            return;
+
+        System.out.println("Starting TCP Network test with duration "+ duration + " ms, windowSize "+ bufferSize +" bytes and "+ threadCount +" threads for each client connection.");
+        new Thread(new NetworkIOTester(serverAddress, clientAddresses, threadCount, duration, bufferSize)).start();
+        }
 
 }

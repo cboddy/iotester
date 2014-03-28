@@ -20,12 +20,13 @@ public class NetworkIOTester extends IOTester
         {
             this.address = address;
             this.ssocket = new ServerSocket();
+            this.ssocket.setSoTimeout(1000);
             this.ssocket.bind(address);
         }
 
         public void run()
         {
-            while(true)
+            while(! NetworkIOTester.this.isClosed)
             {
                 try
                 {
@@ -34,6 +35,7 @@ public class NetworkIOTester extends IOTester
                     ConnectionHandler handler = new ConnectionHandler(s);
                     System.out.println("Starting handler.");
                     new Thread(handler).start();
+                } catch (SocketTimeoutException ste){
                 } catch (Throwable t) {
                     t.printStackTrace();
                 }
@@ -53,14 +55,8 @@ public class NetworkIOTester extends IOTester
         {
             this.socket = s;
 
-            //this.in = new DataInputStream(new BufferedInputStream(s.getInputStream(), bufferSize *2));
-            //this.out = new DataOutputStream(new BufferedOutputStream(s.getOutputStream(), bufferSize *2));
-
             this.in = new DataInputStream(new BufferedInputStream(s.getInputStream()));
             this.out = new DataOutputStream(new BufferedOutputStream(s.getOutputStream()));
-
-            //this.in = new DataInputStream(s.getInputStream());
-            //this.out = new DataOutputStream(s.getOutputStream());
 
             this.buffer = new byte[bufferSize];
         }
@@ -71,25 +67,35 @@ public class NetworkIOTester extends IOTester
         {
 
             isClosed = true;
+            System.out.println("Closing "+ this);
             try
             {
                 socket.close();
             } catch (IOException ioe) {}
+
         }
 
         public void run()
         {
+            while(true)
+            {
+                try
+                {
+                    //
+                    // Dont start I/O operations until the timer is started
+                    //
+                    latch.await();
+                    break;
+                } catch (InterruptedException ie){}
+            }
 
             while(! isClosed)
             {
                 try
                 {
                     doIO(); 
-                } catch (SocketException se) {
-                    se.printStackTrace();
-                    close();
-                } catch (EOFException eofe) {
-                    eofe.printStackTrace();
+                } catch (SocketException | EOFException e) {
+                    e.printStackTrace();
                     close();
                 } catch (IOException ioe) {
                     ioe.printStackTrace();
@@ -133,7 +139,7 @@ public class NetworkIOTester extends IOTester
     final Client[] clients;
     final int threadCount;
 
-    NetworkIOTester(InetSocketAddress serverAddress, InetSocketAddress[] clientAddresses, int threadCount, int duration, int bufferSize) throws IOException
+    public NetworkIOTester(InetSocketAddress serverAddress, InetSocketAddress[] clientAddresses, int threadCount, int duration, int bufferSize) throws IOException
     {
         super(duration, bufferSize);
 
@@ -175,7 +181,7 @@ public class NetworkIOTester extends IOTester
 
                     client = new Client(s);
                     clients[iClient * threadCount + iThread] = client; 
-                    System.out.println("Starting client to "+ address);
+                    System.out.println("Starting client to server-address "+ address);
                     new Thread(client).start();
                 } catch (Exception e) {
                     e.printStackTrace();
@@ -184,12 +190,12 @@ public class NetworkIOTester extends IOTester
             }
         }
     } 
-    
+
     public void init()
     {
         if (server != null)
         {
-            System.out.println("Starting server.");
+            System.out.println("Starting server on network address "+ server.ssocket);
             new Thread(server).start();
         }
         if (clients != null)
@@ -215,9 +221,16 @@ public class NetworkIOTester extends IOTester
         //System.out.println("Using socket parameters send/receive buffer size :"+ s.getSendBufferSize() +" / "+s.getReceiveBufferSize() +" no-delay ?" + s.getTcpNoDelay());
     }
 
-    public void close()
+    public synchronized void close()
     {
+        super.close();
+        if (clients != null)
+        {
+            for (Client client :  clients)
+                if (client != null && ! client.isClosed)
+                    client.close();
+        }
+
         System.out.println("Ran for "+ (duration / 1000) +" seconds, exiting.");
-        System.exit(0);
     }
 }

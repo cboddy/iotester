@@ -12,14 +12,14 @@ public class DiskIOTester extends IOTester
     /**
      * Thread safe
      */ 
-    class Handler implements Runnable
+    private class Handler implements Runnable
     {
+        private volatile boolean isClosed;
+        private long lastPosition;
+
         private final byte[] buffer = new byte[bufferSize];
         private final RandomAccessFile rFile;
         private final FileChannel channel;
-
-        private volatile boolean isClosed;
-        private long lastPosition;
 
         Handler() throws IOException
         {
@@ -30,7 +30,20 @@ public class DiskIOTester extends IOTester
 
         public void run()
         {
+            while(true)
+            {
+                try
+                {
+                    //
+                    // Dont start I/O operations until the timer is started
+                    //
+                    latch.await();
+                    break;
+                } catch (InterruptedException ie){}
+            }
+
             ByteBuffer readBuffer = ByteBuffer.allocate(buffer.length);
+            
             while (! isClosed)
             {
                 try
@@ -80,8 +93,16 @@ public class DiskIOTester extends IOTester
             isClosed = true;
             try
             {
-                channel.close();
-                rFile.close();
+                if (channel != null)
+                    channel.close();
+            } catch (IOException ioe){
+                ioe.printStackTrace();
+            }
+
+            try
+            {
+                if (rFile != null)
+                    rFile.close();
             } catch (IOException ioe){
                 ioe.printStackTrace();
             }
@@ -94,21 +115,22 @@ public class DiskIOTester extends IOTester
                 pos += buffer.length;
             else
                 pos = random.nextLong();    
-        
+
             if (pos < 0)
                 pos *= -1;
-            
+
             pos %= (maxSize - buffer.length);
             lastPosition = pos;
             return pos; 
         }
     }
 
+    private Handler handler;
+
     private final File f;
     private final boolean reading, randomAccess;
-    private Handler handler;
     private final long maxSize;
-    
+
 
     DiskIOTester(int duration, int bufferSize, String filePath, boolean reading, long maxSize, boolean randomAccess) throws IOException
     {
@@ -142,11 +164,13 @@ public class DiskIOTester extends IOTester
             handler = new Handler();
             new Thread(handler).start();
         } catch (IOException ioe) { 
+            close();
             throw new IllegalStateException(ioe);
         }
     }
     public synchronized void close()
     {
+        super.close();
         handler.close();
     }
 
